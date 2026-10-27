@@ -1,0 +1,25 @@
+# --- Telegram->MT5 bridge as a systemd service ------------------------------
+# Install:
+#   sudo install -m 644 bridge/tg-bridge.service /etc/systemd/system/
+#   sudo systemctl enable --now tg-bridge
+# Watch heartbeats + signals:
+#   journalctl -fu tg-bridge
+# IMPORTANT: do the first browser login interactively BEFORE enabling:
+#   venv/bin/python bridge/telegram_to_mt5.py
+# (a systemd service has no TTY: without a saved session the login fails).
+#
+# The bridge logs "[mt5-bridge] heartbeat: alive ..." every heartbeat_min
+# minutes (config.properties), and exits itself on a clean Telegram
+# disconnection; Restart=always then opens a fresh connection.
+# For user-level systemd put a copy in ~/.config/systemd/user and use
+#   systemctl --user enable --now tg-bridge (paths unchanged).
+
+[Unit]
+Description=Telegram signal bridge to MT5 (tg-bridge)
+
+[Service]
+Type=exec
+WorkingDirectory=/mnt/data/projetos/telegram-copy-trade
+ExecStart=/mnt/data/projetos/telegram-copy-trade/venv/bin/python3 /mnt/data/projetos/telegram-copy-trade/bridge/telegram_to_mt5.py
+Restart=always
+RestartSec=15

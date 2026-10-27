@@ -1,0 +1,24 @@
+; TelegramSignalCopier input settings
+; Signals come from the Python bridge only (bridge/telegram_to_mt5.py):
+; it does the Telegram login and watches the groups configured in
+; bridge/config.properties (groups=), writing one JSON per
+; relevant message into <MT5 data folder>\MQL5\Files\tg_signals.
+InpPollSec=5
+InpMagic=20261019
+InpLotGold=0.01
+InpLotForex=0.2
+InpLotETH=0.3
+InpLotBTC=0.03
+InpMaxAgeMin=120
+InpMaxOpen=15
+InpZoneTolPct=0.0
+InpDevPoints=30
+InpTrailPts=-1
+InpDebug=true
+InpStateFile=tg_copier_state.txt
+InpDryRun=true
+InpRiskPct=3
+InpSignalsFolder=tg_signals
+; --- behaviour flags -------------------------------------------------------
+InpConservativeMode=true
+InpCloseMaPeriod=20

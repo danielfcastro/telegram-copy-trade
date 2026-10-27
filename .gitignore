@@ -1,0 +1,14 @@
+# --- Python environment (rebuild with: python3 -m venv venv; pip install telethon)
+venv/
+__pycache__/
+*.pyc
+
+# --- bridge runtime artifacts (regenerated every run; session holds auth state)
+bridge/bridge.log
+bridge/bridge.pid
+bridge/*.session
+
+# --- editor / OS noise ---
+*.swp
+*~
+.DS_Store
