@@ -55,6 +55,12 @@ to live MT5 orders.
 | Key | What to put |
 |-----|-------------|
 | `api_id` / `api_hash` | Your app credentials from <https://my.telegram.org> (own account). The tracked file keeps placeholders — put the REAL values in `bridge/config.local.properties` (untracked); the bridge prefers them automatically |
+
+> **Pull-safety**: `bridge/config.properties` is guarded by `.gitattributes`
+> (`merge=ours`), so pulling/merging anything from GitHub can NEVER rewrite
+> whatever you have locally on that file; and the real credentials live in the
+> gitignored `config.local.properties`. Both files survive any pull untouched —
+> nothing to re-edit after fetching.
 | `session_name` | Telethon session filename (login is saved here after the first run) |
 | `groups=` | Comma-separated entries `id` or `id:<absolute output folder>`. The `id` is exactly as it appears in the `web.telegram.org` link — the bridge automatically also watches the two derived real forms (migrated-group `id − 2³²` and channel `−100…` form), so no conversion is needed. With `id:<folder>` that group's files go to its own MT5 sandbox folder (one per broker/terminal); bare ids fall back to `mt5_folder` |
 | `log_level` | Logging verbosity `debug`/`info`/`warn`/`error`/`fatal` (default `info`: startup, written files, heartbeats; `debug` also logs every message received from watched channels) |

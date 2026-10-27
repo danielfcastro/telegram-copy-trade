@@ -7,6 +7,7 @@ __pycache__/
 bridge/bridge.log
 bridge/bridge.pid
 bridge/*.session
+bridge/*.session-journal
 
 # --- compiled EA binaries (build stays in the MT5 project, never in git) ---
 *.ex4
