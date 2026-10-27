@@ -31,9 +31,11 @@ to live MT5 orders.
   & colored logging (`debug < info < warn < error < fatal`), proof-of-life
   heartbeats, atomic UTF-16 file writes, daemon script + systemd unit.
 - Symbols are **resolved against the current broker** (names like `XAUUSD!` are
-  handled automatically); a pair-mask configuration is coming (roadmap below).
-- **Roadmap (next)**: per-broker pair mask in config; multi-folder bridge output
-  (one signals folder per watched group/broker).
+  handled automatically) **and configurable with a pair mask** — `InpSymbolMask`
+  builds the broker's exact name (e.g. `%s!` → `XAUUSD!`, `%L` → `xauusd`) so
+  one EA serves any broker; empty mask keeps the auto-detect fallback.
+- **Roadmap (next)**: multi-folder bridge output (one signals folder per
+  watched group/terminal).
 
 ## How to configure and run everything (step by step)
 
@@ -347,6 +349,7 @@ the bridge drops into `MQL5\Files\tg_signals`.
 | `InpDryRun` | `true`: never send orders, only log what would be placed — `[DRY-RUN] would place PENDING SELL LIMIT XAUUSD RISK=3.00% LOT=0.02 TP3=4148 SL=4193 - ...` (order line format: type PAIR RISK LOT TP SL; default `false` in code; `true` in the shipped `.set`) |
 | `InpRiskPct` | % of Balance risk per signal; `0` = fixed lots (default `0`) |
 | `InpSignalsFolder` | Subfolder of `MQL5\Files` the bridge writes into (default `tg_signals`) |
+| `InpSymbolMask` | Mask that builds the **broker's exact symbol name** from the pair in the signal: `%s`=as typed, `%U`=UPPER, `%L`=lower, `%%`=literal `%` (e.g. `%s!` → `XAUUSD!`, `usd_%L` → `xauusd`; set one per terminal via its `.set`). Empty (default) = auto-detect against the connected broker; if the mask misses, it logs a warning and auto-detects anyway |
 
 ## Notes / limitations
 
