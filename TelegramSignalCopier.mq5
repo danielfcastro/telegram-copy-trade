@@ -408,30 +408,50 @@ double GetLot(string base)
 //+------------------------------------------------------------------+
 string ExpandMask(string pattern,string base)
 {
-   string up="", lo="";
-   for(int i=0;i<StringLen(base);i++)
-   {
-      ushort c=StringGetCharacter(base,i);
-      if(c>='a'&&c<='z'){ up+=ShortToString((ushort)(c-32)); lo+=ShortToString(c); }
-      else if(c>='A'&&c<='Z'){ up+=ShortToString(c); lo+=ShortToString((ushort)(c+32)); }
-      else { up+=ShortToString(c); lo+=ShortToString(c); }
-   }
-   string o="";
-   int L=StringLen(pattern);
-   for(int i=0;i<L;i++)
-   {
-      ushort c=StringGetCharacter(pattern,i);
-      if(c=='%' && i+1<L)
-      {
-         ushort n=StringGetCharacter(pattern,i+1);
-         if(n=='s'){ o+=base; i++; continue; }
-         if(n=='U'){ o+=up;   i++; continue; }
-         if(n=='L'){ o+=lo;   i++; continue; }
-         if(n=='%'){ o+="%";  i++; continue; }
-      }
-      o+=ShortToString(c);
-   }
-   return o;
+    string up="", lo="";
+    for(int i=0;i<StringLen(base);i++) {
+        ushort c=StringGetCharacter(base,i);
+        if(c>='a' && c<='z') {
+            up+=ShortToString((ushort)(c-32));
+            lo+=ShortToString(c);
+        } else if(c>='A' && c<='Z') {
+            up+=ShortToString(c);
+            lo+=ShortToString((ushort)(c+32));
+        } else {
+            up+=ShortToString(c);
+            lo+=ShortToString(c);
+        }
+    }
+    string o="";
+    int L=StringLen(pattern);
+    for(int i=0;i<L;i++) {
+        ushort c=StringGetCharacter(pattern,i);
+        if(c=='%' && i+1<L) {
+            ushort n=StringGetCharacter(pattern,i+1);
+            if(n=='s') {
+                o+=base;
+                i++;
+                continue;
+            }
+            if(n=='U') {
+                o+=up;
+                i++;
+                continue;
+            }
+            if(n=='L') {
+                o+=lo;
+                i++;
+                continue;
+            }
+            if(n=='%') {
+                o+="%";
+                i++;
+                continue;
+            }
+        }
+        o+=ShortToString(c);
+    }
+    return o;
 }
 
 //+------------------------------------------------------------------+
@@ -443,22 +463,29 @@ string ExpandMask(string pattern,string base)
 //+------------------------------------------------------------------+
 bool ResolveSymbol(string base, string &out)
 {
-   if(InpSymbolMask!="")
-   {
-      string cand=ExpandMask(InpSymbolMask,base);
-      bool mc=false;
-      if(SymbolExist(cand,mc)){ out=cand; return true; }
-      LogMsg("warning: InpSymbolMask '"+InpSymbolMask+"' produced '"+cand+"' which is not on this broker - falling back to auto-detect");
-   }
-   bool custom=false;
-   if(SymbolExist(base,custom)){ out=base; return true; }
-   int n=SymbolsTotal(false);
-   for(int i=0;i<n;i++)
-   {
-      string s=SymbolName(i,false);
-      if(StringFind(s,base)>=0){ out=s; return true; }
-   }
-   return false;
+    if(InpSymbolMask!="") {
+        string cand=ExpandMask(InpSymbolMask,base);
+        bool mc=false;
+        if(SymbolExist(cand,mc)) {
+            out=cand;
+            return true;
+        }
+        LogMsg("warning: InpSymbolMask '"+InpSymbolMask+"' produced '"+cand+"' which is not on this broker - falling back to auto-detect");
+    }
+    bool custom=false;
+    if(SymbolExist(base,custom)) {
+        out=base;
+        return true;
+    }
+    int n=SymbolsTotal(false);
+    for(int i=0;i<n;i++) {
+        string s=SymbolName(i,false);
+        if(StringFind(s,base)>=0) {
+            out=s;
+            return true;
+        }
+    }
+    return false;
 }
 
 //+------------------------------------------------------------------+
