@@ -22,3 +22,9 @@ InpSignalsFolder=tg_signals
 ; --- behaviour flags -------------------------------------------------------
 InpConservativeMode=true
 InpCloseMaPeriod=20
+; --- symbol naming (per broker) ----------------------------------------------
+; Mask to build the broker's own symbol name from the pair in the signal:
+; %s=as typed, %U=UPPER, %L=lower, %%=literal %. e.g. InpSymbolMask=%s!
+; gives XAUUSD!, BTCUSD!; "%L" gives xauusd (Exness-style). Empty = the
+; EA auto-resolves against the connected broker (this repo's default).
+InpSymbolMask=
