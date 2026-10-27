@@ -8,6 +8,10 @@ bridge/bridge.log
 bridge/bridge.pid
 bridge/*.session
 
+# --- compiled EA binaries (build stays in the MT5 project, never in git) ---
+*.ex4
+*.ex5
+
 # --- editor / OS noise ---
 *.swp
 *~
