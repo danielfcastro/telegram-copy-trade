@@ -16,3 +16,6 @@ bridge/*.session
 *.swp
 *~
 .DS_Store
+
+# --- local credential overrides (real values stay off the public repo) ---
+bridge/config.local.properties
