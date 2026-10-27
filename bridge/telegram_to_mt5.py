@@ -8,9 +8,11 @@
 # every new message that looks like a trading signal (BUY/SELL + symbol), first
 # filters (only watched groups, only signal-looking messages) and then writes a
 # JSON file named  PAIR_YYYYMMDD_HHMMSS_<telegram_msg_id>.json  into the MT5
-# Files sandbox. The Expert Advisor (TelegramSignalCopier.mq5) scans that
-# folder, parses the message text with its own parser, opens the trades and
-# deletes the file once processed.
+# Files sandbox (or the per-group folder configured with 'id:<folder>' entries
+# in groups=, so one bridge can feed several MT5 terminals at once). The
+# Expert Advisor (TelegramSignalCopier.mq5) scans that folder, parses the
+# message text with its own parser, opens the trades and deletes the file
+# once processed.
 #
 # Run (console):
 #   pip install telethon
@@ -60,23 +62,60 @@ else:
     CONFIG = Path(__file__).resolve().parent / "config.properties"  # next to the script
 
 
+def norm_path(v):
+    # accept paths pasted from a shell (escaped "\ "), tolerate duplicated
+    # "//" separators and a trailing "/"
+    v = v.replace("\\ ", " ")
+    v = re.sub(r"//+", "/", v)
+    if len(v) > 1:
+        v = v.rstrip("/")
+    return v
+
 def load_config(path):
     cfg = {}
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                cfg[k.strip()] = v.strip()
-    # mt5_folder: accept paths pasted from a shell (escaped "\ "), tolerate
-    # duplicated "//" separators and a trailing "/".
+    local = Path(path).with_name("config.local.properties")
+    for p in (path, local):
+        # bridge/config.local.properties (gitignored) overrides keys from the
+        # tracked config.properties — keep your REAL api_id/api_hash there, so
+        # the repo copy can carry placeholders without breaking the watcher.
+        if not p.exists():
+            continue
+        with open(p, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    cfg[k.strip()] = v.strip()
     if cfg.get("mt5_folder"):
-        v = cfg["mt5_folder"].replace("\\ ", " ")
-        v = re.sub(r"//+", "/", v)
-        if len(v) > 1:
-            v = v.rstrip("/")
-        cfg["mt5_folder"] = v
+        cfg["mt5_folder"] = norm_path(cfg["mt5_folder"])
     return cfg
+
+def parse_watch(raw_tokens, default_dir):
+    """Map every watched chat id to its OUTPUT FOLDER.
+
+    A groups= entry is either "id" (uses the default mt5_folder) or
+    "id:<absolute folder>" (own output dir - one per broker/terminal). The
+    id is accepted exactly as pasted from a web.telegram.org link; all derived
+    real forms (migrated-group id-2^32 and channel -100...) map to the SAME
+    folder. Returns {chat_id: folder}.
+    """
+    watch = {}
+    for tok in raw_tokens:
+        tok = tok.strip()
+        if not tok:
+            continue
+        if ":" in tok:
+            gid, folder = tok.split(":", 1)
+            folder = norm_path(folder.strip())
+        else:
+            gid, folder = tok, default_dir
+        n = int(gid.strip())
+        keys = [n]
+        if n < 0:
+            keys += [n - 2**32, -(10**12 + abs(n))]   # same forms as before
+        for k in keys:
+            watch[k] = folder
+    return watch
 
 # --- groups to watch ---------------------------------------------------------
 # The ids below are the ones from your web.telegram.org links
@@ -159,22 +198,14 @@ async def main():
     out_dir = cfg.get("mt5_folder") or str(BASE / "mt5_files" / "tg_signals")
 
     # groups: config.properties 'groups=' wins, else the WEB_IDS list above.
-    raw_ids = ([s.strip() for s in cfg["groups"].split(",") if s.strip()]
+    # An entry may also be 'id:<absolute folder>' so that each group's files
+    # go to its own MT5 sandbox folder (multi-broker / multi-terminal); bare
+    # ids use mt5_folder. All derived real forms of an id share its folder.
+    raw_groups = ([s for s in cfg["groups"].split(",") if s.strip()]
                if cfg.get("groups") else [str(i) for i in WEB_IDS])
-    # A value pasted from a web.telegram.org link is "short" (= raw + 2^32);
-    # short and full ids overlap, so the pasted value alone is ambiguous.
-    # For every negative id watch BOTH: the value as typed, and value-2^32
-    # (its raw interpretation). If the typed value was already the full id,
-    # the extra entry simply never matches anything.
-    watch = set()
-    for s in raw_ids:
-        n = int(s)
-        watch.add(n)
-        if n < 0:
-            watch.add(n - 2**32)                       # migrated-group form
-            watch.add(-(10**12 + abs(n)))              # channel form ("100"+id)
-    # event.chat_id is the SIGNED raw chat id (negative for groups/channels),
-    # so 'watch' (both pasted and derived forms) is matched directly.
+    watch = parse_watch(raw_groups, out_dir)
+    # event.chat_id is the SIGNED raw chat id (negative for groups/channels);
+    # parse_watch registered every pasted and derived form → direct lookup.
     ignored_seen = set()   # print the real chat id of unwatched chats once
 
     if not cfg.get("mt5_folder"):
@@ -193,7 +224,8 @@ async def main():
         async def ev(event):
             nonlocal written
             # filter first: only the watched groups, only BUY/SELL-looking messages
-            if event.chat_id not in watch:
+            folder = watch.get(event.chat_id)
+            if folder is None:
                 if event.chat_id not in ignored_seen:
                     ignored_seen.add(event.chat_id)
                     plog("warn", f"[mt5-bridge] message from unwatched chat {event.chat_id} "
@@ -208,12 +240,13 @@ async def main():
             msg = event.message
             if not msg.text or not SIGNAL_RE.search(msg.text):
                 return
-            write_signal_file(out_dir, msg)
+            write_signal_file(folder, msg)
             written += 1
 
-        plog("info", f"[mt5-bridge] watching the {len(raw_ids)} configured groups "
-              f"(ids as in the web.telegram.org links), writing to {out_dir} - "
-              f"Ctrl+C to stop")
+        folders = sorted(set(watch.values()))
+        plog("info", f"[mt5-bridge] watching the {len(raw_groups)} configured groups "
+              f"(ids as in the web.telegram.org links) into {len(folders)} output "
+              f"folder(s): {', '.join(folders)} - Ctrl+C to stop")
         hb_min = 0
         try:
             hb_min = int(cfg.get("heartbeat_min", "10") or 0)
