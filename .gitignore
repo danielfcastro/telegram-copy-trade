@@ -7,8 +7,16 @@ __pycache__/
 bridge/bridge.log
 bridge/bridge.pid
 bridge/*.session
+bridge/*.session-journal
+
+# --- compiled EA binaries (build stays in the MT5 project, never in git) ---
+*.ex4
+*.ex5
 
 # --- editor / OS noise ---
 *.swp
 *~
 .DS_Store
+
+# --- local credential overrides (real values stay off the public repo) ---
+bridge/config.local.properties

@@ -1,0 +1,4 @@
+# git-flow safety: this file is local (placeholders in git, real values
+# in bridge/config.local.properties). merge=ours guarantees a pull/merge
+# from GitHub NEVER rewrites whatever we have on disk for this path.
+bridge/config.properties merge=ours

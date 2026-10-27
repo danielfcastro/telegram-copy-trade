@@ -35,6 +35,7 @@ input double InpRiskPct   = 0.0;   // Risk sizing: % of Balance at risk per sign
 input string InpSignalsFolder = "tg_signals"; // Subfolder of MQL5\Files where the bridge (telegram_to_mt5.py) writes the signal JSONs
 input bool   InpConservativeMode = true; // true: when the TP1 order closes with profit, remaining SLs move to breakeven; false: keep the original SLs
 input int    InpCloseMaPeriod = 20;     // "Closing the signal" with negative P/L: short SLs to the SMA(period) of the chart timeframe; 0 = keep
+input string InpSymbolMask  = "";       // Broker symbol mask: %s=pair as typed, %U=UPPER, %L=lower, %%=literal % ("%s!" -> XAUUSD!, "%L" -> xauusd). "" = auto-detect (old behavior)
 
 //--- ======================= GLOBALS =======================
 CTrade trade;
@@ -402,19 +403,89 @@ double GetLot(string base)
 }
 
 //+------------------------------------------------------------------+
-//| Resolve broker symbol (handles suffixed symbols like BTCUSDm)    |
+//| Expand a symbol mask: %s=base as typed, %U=UPPER, %L=lower,     |
+//| %%=literal %. ASCII folding only (no locale surprises).          |
+//+------------------------------------------------------------------+
+string ExpandMask(string pattern,string base)
+{
+    string up="", lo="";
+    for(int i=0;i<StringLen(base);i++) {
+        ushort c=StringGetCharacter(base,i);
+        if(c>='a' && c<='z') {
+            up+=ShortToString((ushort)(c-32));
+            lo+=ShortToString(c);
+        } else if(c>='A' && c<='Z') {
+            up+=ShortToString(c);
+            lo+=ShortToString((ushort)(c+32));
+        } else {
+            up+=ShortToString(c);
+            lo+=ShortToString(c);
+        }
+    }
+    string o="";
+    int L=StringLen(pattern);
+    for(int i=0;i<L;i++) {
+        ushort c=StringGetCharacter(pattern,i);
+        if(c=='%' && i+1<L) {
+            ushort n=StringGetCharacter(pattern,i+1);
+            if(n=='s') {
+                o+=base;
+                i++;
+                continue;
+            }
+            if(n=='U') {
+                o+=up;
+                i++;
+                continue;
+            }
+            if(n=='L') {
+                o+=lo;
+                i++;
+                continue;
+            }
+            if(n=='%') {
+                o+="%";
+                i++;
+                continue;
+            }
+        }
+        o+=ShortToString(c);
+    }
+    return o;
+}
+
+//+------------------------------------------------------------------+
+//| Resolve broker symbol. If InpSymbolMask is set the symbol is     |
+//| built from the mask and verified on this broker (e.g. "%s!" for  |
+//| XAUUSD!, "usd_%L"); if the mask misses, log and fall back to    |
+//| auto-detect: exact name first, then any listed symbol whose name |
+//| contains the base (handles suffixed names like BTCUSDm/XAUUSD!). |
 //+------------------------------------------------------------------+
 bool ResolveSymbol(string base, string &out)
 {
-   bool custom=false;
-   if(SymbolExist(base,custom)){ out=base; return true; }
-   int n=SymbolsTotal(false);
-   for(int i=0;i<n;i++)
-   {
-      string s=SymbolName(i,false);
-      if(StringFind(s,base)>=0){ out=s; return true; }
-   }
-   return false;
+    if(InpSymbolMask!="") {
+        string cand=ExpandMask(InpSymbolMask,base);
+        bool mc=false;
+        if(SymbolExist(cand,mc)) {
+            out=cand;
+            return true;
+        }
+        LogMsg("warning: InpSymbolMask '"+InpSymbolMask+"' produced '"+cand+"' which is not on this broker - falling back to auto-detect");
+    }
+    bool custom=false;
+    if(SymbolExist(base,custom)) {
+        out=base;
+        return true;
+    }
+    int n=SymbolsTotal(false);
+    for(int i=0;i<n;i++) {
+        string s=SymbolName(i,false);
+        if(StringFind(s,base)>=0) {
+            out=s;
+            return true;
+        }
+    }
+    return false;
 }
 
 //+------------------------------------------------------------------+

@@ -29,11 +29,13 @@ to live MT5 orders.
 - **Python bridge, no bot**: Telethon on the public Telegram endpoints (web ids
   from `web.telegram.org` links are auto-derived to the real chat ids), leveled
   & colored logging (`debug < info < warn < error < fatal`), proof-of-life
-  heartbeats, atomic UTF-16 file writes, daemon script + systemd unit.
+  heartbeats, atomic UTF-16 file writes, daemon script + systemd unit, and
+  **one output folder per watched group** (`id:<folder>` entries in `groups=`,
+  so one bridge feeds several MT5 terminals/brokers at once).
 - Symbols are **resolved against the current broker** (names like `XAUUSD!` are
-  handled automatically); a pair-mask configuration is coming (roadmap below).
-- **Roadmap (next)**: per-broker pair mask in config; multi-folder bridge output
-  (one signals folder per watched group/broker).
+  handled automatically) **and configurable with a pair mask** — `InpSymbolMask`
+  builds the broker's exact name (e.g. `%s!` → `XAUUSD!`, `%L` → `xauusd`) so
+  one EA serves any broker; empty mask keeps the auto-detect fallback.
 
 ## How to configure and run everything (step by step)
 
@@ -45,15 +47,22 @@ to live MT5 orders.
 | `TelegramSignalCopier.set` | Ready-to-use input preset (`InpDryRun=true`, `InpRiskPct=3`) |
 | `bridge/telegram_to_mt5.py` | Python watcher (Telethon): reads Telegram, writes one JSON per signal message |
 | `bridge/config.properties` | Telegram credentials, watched groups and the MT5 output folder |
+| `bridge/config.local.properties` | **Untracked** local override file: keep your REAL `api_id`/`api_hash` here so the git copy can stay placeholder-safe (the bridge merges this file over `config.properties` when present) |
 | `venv/` | Python environment with Telethon already installed (see step 2) — **not tracked** by git; rebuild it with step 2's commands |
 
 ### 1. Configure the bridge — `bridge/config.properties`
 
 | Key | What to put |
 |-----|-------------|
-| `api_id` / `api_hash` | Your app credentials from <https://my.telegram.org> (own account) |
+| `api_id` / `api_hash` | Your app credentials from <https://my.telegram.org> (own account). The tracked file keeps placeholders — put the REAL values in `bridge/config.local.properties` (untracked); the bridge prefers them automatically |
+
+> **Pull-safety**: `bridge/config.properties` is guarded by `.gitattributes`
+> (`merge=ours`), so pulling/merging anything from GitHub can NEVER rewrite
+> whatever you have locally on that file; and the real credentials live in the
+> gitignored `config.local.properties`. Both files survive any pull untouched —
+> nothing to re-edit after fetching.
 | `session_name` | Telethon session filename (login is saved here after the first run) |
-| `groups=` | Comma-separated chat ids exactly as they appear in the `web.telegram.org` links — the bridge automatically also watches the two derived real forms (migrated-group `id − 2³²` and channel `−100…` form), so no conversion is needed |
+| `groups=` | Comma-separated entries `id` or `id:<absolute output folder>`. The `id` is exactly as it appears in the `web.telegram.org` link — the bridge automatically also watches the two derived real forms (migrated-group `id − 2³²` and channel `−100…` form), so no conversion is needed. With `id:<folder>` that group's files go to its own MT5 sandbox folder (one per broker/terminal); bare ids fall back to `mt5_folder` |
 | `log_level` | Logging verbosity `debug`/`info`/`warn`/`error`/`fatal` (default `info`: startup, written files, heartbeats; `debug` also logs every message received from watched channels) |
 | `color` | `always` (default): the log file itself carries the ANSI color codes, so `tail -f bridge/bridge.log` shows colors in your terminal (`grep` then sees raw `^[[` codes — pipe through `sed 's/\x1b\[[0-9;]*m//g'` to strip). `auto` = only on a terminal, `never` = plain |
 | `heartbeat_min` | Minutes between `[INFO] heartbeat: alive ...` proof-of-life lines (default 10; `0` = none) |
@@ -262,6 +271,9 @@ The groups watched are configured in `bridge/config.properties`:
 ```
 groups=-4361070602,-3726820241,-3744710110   # ids from web.telegram.org links
 mt5_folder=C:\Users\you\AppData\Roaming\MetaQuotes\Terminal\<hash>\MQL5\Files\tg_signals
+
+# Per-group output folders (multi-broker): an entry may be 'id:<absolute folder>'
+# groups=-4361070602:/home/you/mt5_broker_a/MQL5/Files/tg_signals,-3726820241:/home/you/mt5_broker_b/MQL5/Files/tg_signals
 ```
 
 Web links show a "short" group id; the bridge converts it to the full chat id
@@ -347,6 +359,7 @@ the bridge drops into `MQL5\Files\tg_signals`.
 | `InpDryRun` | `true`: never send orders, only log what would be placed — `[DRY-RUN] would place PENDING SELL LIMIT XAUUSD RISK=3.00% LOT=0.02 TP3=4148 SL=4193 - ...` (order line format: type PAIR RISK LOT TP SL; default `false` in code; `true` in the shipped `.set`) |
 | `InpRiskPct` | % of Balance risk per signal; `0` = fixed lots (default `0`) |
 | `InpSignalsFolder` | Subfolder of `MQL5\Files` the bridge writes into (default `tg_signals`) |
+| `InpSymbolMask` | Mask that builds the **broker's exact symbol name** from the pair in the signal: `%s`=as typed, `%U`=UPPER, `%L`=lower, `%%`=literal `%` (e.g. `%s!` → `XAUUSD!`, `usd_%L` → `xauusd`; set one per terminal via its `.set`). Empty (default) = auto-detect against the connected broker; if the mask misses, it logs a warning and auto-detects anyway |
 
 ## Notes / limitations
 
