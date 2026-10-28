@@ -21,6 +21,9 @@ to live MT5 orders.
   the stop on live positions *and* on untriggered pendings; "Closing the signal"
   closes everything when open P/L is positive, otherwise **shortens each SL toward
   the SMA** of the chart timeframe (`InpCloseMaPeriod`) and lets the stop decide.
+  A reply acts on the signal it replies to: the bridge keeps Telegram's thread
+  link (`reply_to` + `reply_to_text`) in the JSON, so the target is exact —
+  matching by pair name is only a fallback.
 - **Journal logs every order line in full**: `TYPE PAIR RISK% LOT TP SL` + why
   pending/market was chosen; `[DRY-RUN]` prints the exact same line while testing.
 - **Signal files are never deleted**: processed files are moved to
@@ -141,8 +144,16 @@ The bridge reads `config.properties` from next to the script (or next to the `.e
      every open position is closed and untriggered pendings deleted; **negative** →
      each SL is *shortened toward* the SMA of `InpCloseMaPeriod` on the chart
      timeframe (never loosened) and the stop decides the rest by itself.
-   A reply that does not name the pair is acted on only when exactly **one** signal
-   is active; otherwise the EA logs "skipped (ambiguous)". 
+   **Target resolution** (in order): the bridge now writes `reply_to` (the id of
+   the message the reply replies to) and `reply_to_text` (that message's text)
+   into every signal file, and the EA uses that thread link first — matched
+   exactly against the tracked signal's Telegram id; if the EA reloaded and lost
+   that link, the replied-to *text* still identifies the signal (re-parsing its
+   entry, or matching the pair it names), which survives restarts. Only when no
+   thread link resolves does the old heuristic apply: a reply that does not name
+   the pair is acted on only when exactly **one** signal is active; otherwise the
+   EA logs "skipped (ambiguous)". (A reply to another *reply* still falls back to
+   the heuristic — the channel normally replies to the signal itself.)
 
 Signal files are **UTF-16 with BOM + CRLF** — the native text format of MQL5 `FILE_TXT`
 (this is why MT5's own `.set`/state files look the same). From a shell, read them with
