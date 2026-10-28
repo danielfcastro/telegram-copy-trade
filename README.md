@@ -129,7 +129,7 @@ The bridge reads `config.properties` from next to the script (or next to the `.e
    — **only while `InpConservativeMode=true` (the default)**; off, the original SLs
    stay. The TP2 order closes with profit → the last order (TP3) gets a trailing stop
    that follows the price (`InpTrailPts`, default = the signal's risk distance).
-4. A pending never triggered and is older than `InpMaxAgeMin` minutes → the EA auto-deletes it.
+4. A pending never triggered and is older than `InpMaxAgeMin` minutes → the EA auto-deletes it (the expiry reads the order book directly, so it still fires after a recompile/re-attach and from any chart running the EA).
 5. Watcher side: heartbeats every `heartbeat_min` minutes prove liveness; when a signal
    arrives it logs `[INFO] wrote signal file, full path: .../PAIR_....json` (the whole
    absolute path of the file dropped into `tg_signals`).
