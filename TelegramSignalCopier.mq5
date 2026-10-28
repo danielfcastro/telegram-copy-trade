@@ -697,7 +697,15 @@ void OpenSignal(Sig &s)
       // quote than SYMBOL_TRADE_STOPS_LEVEL ("invalid price"). Keep the
       // pending only when the edge clears that band; otherwise market.
       double stp=SymbolInfoInteger(s.symbol,SYMBOL_TRADE_STOPS_LEVEL)*SymbolInfoDouble(s.symbol,SYMBOL_POINT);
-      canPend=(s.side>0) ? (iAskPrice(s.symbol,0)+stp<level) : (iBidPrice(s.symbol,0)-stp>level);
+      // both order types we actually place (BUY STOP for BUY, SELL LIMIT for
+      // SELL) wait for the price to rise to the edge: both sit ABOVE the
+      // market, so the terminal validates both with the same rule - order
+      // price >= Ask + stops level. The old per-side test applied the
+      // SELL STOP rule (Bid - stops level) to the SELL branch, which is
+      // inverted: it kept a SellLimit that is always rejected [invalid
+      // price] and fell back to market when the pending would have been
+      // valid. Keep the pending only when the edge clears that band.
+      canPend=(iAskPrice(s.symbol,0)+stp<level);
    }
    //+ log format (as requested): ORDER TYPE - SYMBOL - RISK% - LOT - TP - SL,
    //  plus WHY pending vs market was chosen (price inside/outside the zone)
@@ -1070,6 +1078,42 @@ void CleanupActive()
 }
 
 //+------------------------------------------------------------------+
+//| Expiry straight from the order book: in-memory signal tracking     |
+//| (active[]) is lost whenever the EA is recompiled/re-attached or    |
+//| when a second chart runs the EA - untriggered pendings placed     |
+//| by an instance that has since died were never aged-checked, so    |
+//| InpMaxAgeMin silently never fired. This scan goes to the book     |
+//| itself: every open pending carrying our magic whose setup time    |
+//| (ORDER_TIME_SETUP) is older than InpMaxAgeMin is deleted,         |
+//| regardless of in-memory state. Orders still owned by a tracked    |
+//| signal stay handled by CleanupActive (same rule, richer logging). |
+//+------------------------------------------------------------------+
+void ExpireOrphanPendings()
+{
+   if(InpMaxAgeMin<=0) return;
+   for(int i=OrdersTotal()-1;i>=0;i--)
+   {
+      ulong tk=OrderGetTicket(i);
+      if(tk==0) continue;
+      if(OrderGetInteger(ORDER_MAGIC)!=InpMagic) continue;
+      long ot=OrderGetInteger(ORDER_TYPE);
+      bool pend=(ot==ORDER_TYPE_BUY_STOP||ot==ORDER_TYPE_SELL_STOP||ot==ORDER_TYPE_BUY_LIMIT||ot==ORDER_TYPE_SELL_LIMIT);
+      if(!pend) continue;
+      bool tracked=false;
+      for(int a=0;a<ArraySize(active)&&!tracked;a++)
+         for(int j=0;j<3&&!tracked;j++)
+            if(active[a].oticket[j]==tk) tracked=true;
+      if(tracked) continue;   // in-memory signal owns it: CleanupActive applies the same rule with full logging
+      datetime born=(datetime)OrderGetInteger(ORDER_TIME_SETUP);
+      if(born==0) continue;
+      if((long)TimeCurrent()-(long)born>(long)InpMaxAgeMin*60)
+         if(trade.OrderDelete(tk))
+            LogMsg("expired untriggered pending deleted ("+OrderGetString(ORDER_SYMBOL)+")");
+   }
+}
+
+
+//+------------------------------------------------------------------+
 //| Trailing stops: while armed by OnTradeTransaction (after the     |
 //| middle TP closed), the SL of the far order follows the current   |
 //| price keeping trailDist of distance - but the value only ever   |
@@ -1325,6 +1369,7 @@ void OnTick()
       g_nextPoll=TimeCurrent()+InpPollSec;
    }
    CleanupActive();
+   ExpireOrphanPendings();   // order-book expiry: survives reloads & multi-chart
    ApplyTrailing();
 }
 
