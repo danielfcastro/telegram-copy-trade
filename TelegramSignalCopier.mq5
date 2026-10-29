@@ -159,9 +159,9 @@ string UnescapeJson(string raw)
 //+------------------------------------------------------------------+
 //| JSON: extract all "text" values and their preceding message_id   |
 //+------------------------------------------------------------------+
-void ExtractUpdates(string &json, long &ids[], string &texts[])
+void ExtractUpdates(string &json, long &ids[], string &texts[], long &replyIds[], string &replyTexts[])
 {
-   ArrayResize(ids,0); ArrayResize(texts,0);
+   ArrayResize(ids,0); ArrayResize(texts,0); ArrayResize(replyIds,0); ArrayResize(replyTexts,0);
    int L=StringLen(json);
    int p=0;
    while(true)
@@ -200,9 +200,50 @@ void ExtractUpdates(string &json, long &ids[], string &texts[])
          id=StringToInteger(num);
          midx=StringFind(head,"\"message_id\":",midx+1);
       }
+      // "reply_to": / "reply_to_text": follow this record's text
+      // (bridge files written before the thread fix simply lack them -> 0,"")
+      long rtid=0; string rttext="";
+      int nt=StringFind(json,"\"text\":",q);
+      int rp=StringFind(json,"\"reply_to\":",q);
+      if(rp>=0 && (nt<0 || rp<nt))
+      {
+         int d=rp+11;   // length of "reply_to":
+         while(d<L && StringGetCharacter(json,d)==' ') d++;
+         string num="";
+         if(d<L && StringGetCharacter(json,d)=='-'){ num="-"; d++; }
+         while(d<L && IsDigitCh(StringGetCharacter(json,d))){ num+=ShortToString((ushort)StringGetCharacter(json,d)); d++; }
+         rtid=StringToInteger(num);
+         int rtp=StringFind(json,"\"reply_to_text\":",q);
+         if(rtp>=0 && (nt<0 || rtp<nt))
+         {
+            int e=rtp+16;   // length of "reply_to_text":
+            while(e<L && StringGetCharacter(json,e)==' ') e++;
+            if(e<L && StringGetCharacter(json,e)=='"')
+            {
+               e++;
+               string raw2="";
+               bool closed2=false;
+               while(e<L)
+               {
+                  ushort c2=StringGetCharacter(json,e);
+                  if(c2=='\\')
+                  {
+                     raw2+=ShortToString((ushort)c2); e++;
+                     if(e<L){ raw2+=ShortToString((ushort)(StringGetCharacter(json,e)&0xFF)); e++; }
+                     continue;
+                  }
+                  if(c2=='"'){ closed2=true; break; }
+                  raw2+=ShortToString((ushort)(c2&0xFF)); e++;
+               }
+               if(closed2) rttext=UnescapeJson(raw2);
+            }
+         }
+      }
       int n=ArraySize(texts);
       ArrayResize(texts,n+1); texts[n]=UnescapeJson(raw);
       ArrayResize(ids,n+1);   ids[n]=id;
+      ArrayResize(replyIds,n+1);   replyIds[n]=rtid;
+      ArrayResize(replyTexts,n+1); replyTexts[n]=rttext;
       p=q+1;
    }
 }
@@ -697,7 +738,15 @@ void OpenSignal(Sig &s)
       // quote than SYMBOL_TRADE_STOPS_LEVEL ("invalid price"). Keep the
       // pending only when the edge clears that band; otherwise market.
       double stp=SymbolInfoInteger(s.symbol,SYMBOL_TRADE_STOPS_LEVEL)*SymbolInfoDouble(s.symbol,SYMBOL_POINT);
-      canPend=(s.side>0) ? (iAskPrice(s.symbol,0)+stp<level) : (iBidPrice(s.symbol,0)-stp>level);
+      // both order types we actually place (BUY STOP for BUY, SELL LIMIT for
+      // SELL) wait for the price to rise to the edge: both sit ABOVE the
+      // market, so the terminal validates both with the same rule - order
+      // price >= Ask + stops level. The old per-side test applied the
+      // SELL STOP rule (Bid - stops level) to the SELL branch, which is
+      // inverted: it kept a SellLimit that is always rejected [invalid
+      // price] and fell back to market when the pending would have been
+      // valid. Keep the pending only when the edge clears that band.
+      canPend=(iAskPrice(s.symbol,0)+stp<level);
    }
    //+ log format (as requested): ORDER TYPE - SYMBOL - RISK% - LOT - TP - SL,
    //  plus WHY pending vs market was chosen (price inside/outside the zone)
@@ -831,6 +880,37 @@ int FindManagementTarget(string &u)
    if(hits==0)
    { LogMsg("management message names no pair and "+IntegerToString(ArraySize(active))+" signals are active - skipped (ambiguous)"); return -1; }
    LogMsg("management message names several pairs - skipped");
+   return -1;
+}
+
+//+------------------------------------------------------------------+
+//| Resolve the target of a management reply by its Telegram thread   |
+//| first: the replied-to message id matches the tracked signal      |
+//| exactly; after an EA restart that link is gone from memory, but |
+//| the replied-to text still identifies the signal (re-parse it, or |
+//| match the pair it names). -1 = not resolvable (heuristic below). |
+//+------------------------------------------------------------------+
+int ResolveReplyTarget(long replyTo, string &replyText)
+{
+   if(replyTo<=0) return -1;
+   for(int i=ArraySize(active)-1;i>=0;i--)
+      if(active[i].msgId==replyTo) return i;
+   string r=ToUpperAscii(replyText);
+   if(r=="") return -1;
+   Sig s;
+   if(ParseSignal(r,s))
+   {
+      string sym="";
+      if(ResolveSymbol(s.base,sym))
+         for(int i=ArraySize(active)-1;i>=0;i--)
+            if(active[i].symbol==sym && active[i].side==s.side) return i;
+      return -1;
+   }
+   for(int i=ArraySize(active)-1;i>=0;i--)
+   {
+      string b=BrokerBaseWord(active[i].symbol);
+      if(b!="" && FindWord(r,b)>=0) return i;
+   }
    return -1;
 }
 bool IsCloseSignalMsg(string &u)
@@ -974,12 +1054,14 @@ void ApplyCloseSignal(int idx)
 //+------------------------------------------------------------------+
 //| Process one Telegram message (may contain several signals)        |
 //+------------------------------------------------------------------+
-void ProcessMessage(string text, long msgId)
+void ProcessMessage(string text, long msgId, long replyTo, string &replyText)
 {
    string u=ToUpperAscii(text);
    if(IsSlMoveMsg(u)||IsCloseSignalMsg(u))
    {
-      int idx=FindManagementTarget(u);
+      int idx=ResolveReplyTarget(replyTo,replyText);
+      if(idx>=0) LogMsg("management reply matched its Telegram thread target (message "+IntegerToString(replyTo)+")");
+      else idx=FindManagementTarget(u);
       if(idx<0) return;
       if(IsSlMoveMsg(u))
       {
@@ -1068,6 +1150,42 @@ void CleanupActive()
       }
    }
 }
+
+//+------------------------------------------------------------------+
+//| Expiry straight from the order book: in-memory signal tracking     |
+//| (active[]) is lost whenever the EA is recompiled/re-attached or    |
+//| when a second chart runs the EA - untriggered pendings placed     |
+//| by an instance that has since died were never aged-checked, so    |
+//| InpMaxAgeMin silently never fired. This scan goes to the book     |
+//| itself: every open pending carrying our magic whose setup time    |
+//| (ORDER_TIME_SETUP) is older than InpMaxAgeMin is deleted,         |
+//| regardless of in-memory state. Orders still owned by a tracked    |
+//| signal stay handled by CleanupActive (same rule, richer logging). |
+//+------------------------------------------------------------------+
+void ExpireOrphanPendings()
+{
+   if(InpMaxAgeMin<=0) return;
+   for(int i=OrdersTotal()-1;i>=0;i--)
+   {
+      ulong tk=OrderGetTicket(i);
+      if(tk==0) continue;
+      if(OrderGetInteger(ORDER_MAGIC)!=InpMagic) continue;
+      long ot=OrderGetInteger(ORDER_TYPE);
+      bool pend=(ot==ORDER_TYPE_BUY_STOP||ot==ORDER_TYPE_SELL_STOP||ot==ORDER_TYPE_BUY_LIMIT||ot==ORDER_TYPE_SELL_LIMIT);
+      if(!pend) continue;
+      bool tracked=false;
+      for(int a=0;a<ArraySize(active)&&!tracked;a++)
+         for(int j=0;j<3&&!tracked;j++)
+            if(active[a].oticket[j]==tk) tracked=true;
+      if(tracked) continue;   // in-memory signal owns it: CleanupActive applies the same rule with full logging
+      datetime born=(datetime)OrderGetInteger(ORDER_TIME_SETUP);
+      if(born==0) continue;
+      if((long)TimeCurrent()-(long)born>(long)InpMaxAgeMin*60)
+         if(trade.OrderDelete(tk))
+            LogMsg("expired untriggered pending deleted ("+OrderGetString(ORDER_SYMBOL)+")");
+   }
+}
+
 
 //+------------------------------------------------------------------+
 //| Trailing stops: while armed by OnTradeTransaction (after the     |
@@ -1174,14 +1292,16 @@ void ProcessSignalFiles()
             continue;
          string path=InpSignalsFolder+"\\"+name;
          string json=ReadFileToString(path);
-         long ids[]; string texts[];
-         ExtractUpdates(json,ids,texts);
+         long ids[]; string texts[]; long replyIds[]; string replyTexts[];
+         ExtractUpdates(json,ids,texts,replyIds,replyTexts);
          int n=ArraySize(texts);
          for(int i=0;i<n;i++)
          {
             long id=(ArraySize(ids)>i ? ids[i] : 0);
             if(id>g_lastMsgId) g_lastMsgId=id;
-            ProcessMessage(texts[i],id);
+            long rt=(ArraySize(replyIds)>i ? replyIds[i] : 0);
+            string rtx=(ArraySize(replyTexts)>i ? replyTexts[i] : "");
+            ProcessMessage(texts[i],id,rt,rtx);
          }
          MoveToConsumed(path,name);   // moved to tg_signals\consumed\ , never deleted
          processed++;
@@ -1325,6 +1445,7 @@ void OnTick()
       g_nextPoll=TimeCurrent()+InpPollSec;
    }
    CleanupActive();
+   ExpireOrphanPendings();   // order-book expiry: survives reloads & multi-chart
    ApplyTrailing();
 }
 

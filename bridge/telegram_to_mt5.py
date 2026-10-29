@@ -157,13 +157,30 @@ def pair_of(text):
         p += "USD"          # BTC->BTCUSD, XAU->XAUUSD, same rule as the EA
     return p
 
+# Telegram threads management replies ("Moving SL to X", "Closing the
+# signal") to the signal message they act on: we keep that link in the
+# JSON (reply_to + reply_to_text) so the EA acts on the exact signal
+# instead of guessing by pair name. seen_texts caches ids -> one-line
+# text because the reply reference from Telegram may carry no text.
+seen_texts = {}
+
+def flat_line(s):
+    return " ".join((s or "").split())
+
 def write_signal_file(out_dir, msg):
     ts = msg.date.strftime("%Y%m%d_%H%M%S")
     name = f"{pair_of(msg.text or 'MSG')}_{ts}_{msg.id}.json"
+    ref = getattr(msg, "reply_to", None)
+    rid = getattr(ref, "id", 0) or 0
+    rtxt = ""
+    if rid:
+        rtxt = seen_texts.get(rid) or flat_line(getattr(ref, "text", ""))
     payload = {
         "message_id": msg.id,
         "date": msg.date.isoformat(),
         "text": msg.text or "",
+        "reply_to": rid,
+        "reply_to_text": rtxt,
     }
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -238,6 +255,11 @@ async def main():
             plog("debug", f"[mt5-bridge] message received from chat {event.chat_id}: "
                   f"{one[:90]}")
             msg = event.message
+            # remember every message we saw (id -> one line) so a later
+            # reply can quote the text of the signal it replies to
+            seen_texts[msg.id] = flat_line(body)
+            if len(seen_texts) > 800:
+                seen_texts.pop(next(iter(seen_texts)))  # ids grow: drop oldest
             if not msg.text or not SIGNAL_RE.search(msg.text):
                 return
             write_signal_file(folder, msg)
