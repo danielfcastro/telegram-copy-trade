@@ -167,14 +167,24 @@ seen_texts = {}
 def flat_line(s):
     return " ".join((s or "").split())
 
-def write_signal_file(out_dir, msg):
+def reply_link_id(msg):
+    # Where the link of a reply is found, by Telethon generation:
+    # - 1.45+: msg.reply_to is a MessageReplyHeader -> .reply_to_msg_id
+    # - older: msg.in_reply_to / msg.comment_id (may not exist anymore)
+    # 0 = the message is not a reply.
+    ref = getattr(msg, "reply_to", None)
+    rid = getattr(ref, "reply_to_msg_id", 0) if ref is not None else 0
+    if not rid:
+        hdr = getattr(msg, "in_reply_to", None)
+        rid = (getattr(hdr, "reply_to_msg_id", 0) if hdr is not None
+               else getattr(msg, "comment_id", 0) or 0)
+    return rid or 0
+
+def write_signal_file(out_dir, msg, chat_id=0):
     ts = msg.date.strftime("%Y%m%d_%H%M%S")
     name = f"{pair_of(msg.text or 'MSG')}_{ts}_{msg.id}.json"
-    ref = getattr(msg, "reply_to", None)
-    rid = getattr(ref, "id", 0) or 0
-    rtxt = ""
-    if rid:
-        rtxt = seen_texts.get(rid) or flat_line(getattr(ref, "text", ""))
+    rid = reply_link_id(msg)
+    rtxt = seen_texts.get((chat_id, rid), "") if rid else ""
     payload = {
         "message_id": msg.id,
         "date": msg.date.isoformat(),
@@ -255,14 +265,25 @@ async def main():
             plog("debug", f"[mt5-bridge] message received from chat {event.chat_id}: "
                   f"{one[:90]}")
             msg = event.message
-            # remember every message we saw (id -> one line) so a later
-            # reply can quote the text of the signal it replies to
-            seen_texts[msg.id] = flat_line(body)
+            # remember every message we saw, keyed by chat (ids repeat per
+            # chat!), so a later reply can quote the text of the signal
+            seen_texts[(event.chat_id, msg.id)] = flat_line(body)
             if len(seen_texts) > 800:
-                seen_texts.pop(next(iter(seen_texts)))  # ids grow: drop oldest
+                seen_texts.pop(next(iter(seen_texts)))  # drop oldest
+            rid0 = reply_link_id(msg)
+            if rid0 and (event.chat_id, rid0) not in seen_texts:
+                # cache missed (e.g. bridge restarted after the signal): fetch
+                # the replied-to message so the link still carries its text
+                try:
+                    rf = await client.get_messages(event.chat_id, ids=rid0)
+                    if rf:
+                        seen_texts[(event.chat_id, rid0)] = flat_line(
+                            rf.text or rf.caption or rf.title or "")
+                except Exception:
+                    pass
             if not msg.text or not SIGNAL_RE.search(msg.text):
                 return
-            write_signal_file(folder, msg)
+            write_signal_file(folder, msg, event.chat_id)
             written += 1
 
         folders = sorted(set(watch.values()))
