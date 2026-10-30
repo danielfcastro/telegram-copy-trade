@@ -893,24 +893,27 @@ int FindManagementTarget(string &u)
 int ResolveReplyTarget(long replyTo, string &replyText)
 {
    if(replyTo<=0) return -1;
+   string r=ToUpperAscii(replyText);
+   if(r!="")
+   {
+      Sig s;
+      if(ParseSignal(r,s))
+      {
+         string sym="";
+         if(ResolveSymbol(s.base,sym))
+            for(int i=ArraySize(active)-1;i>=0;i--)
+               if(active[i].symbol==sym && active[i].side==s.side) return i;
+      }
+   }
+   // msg ids repeat per chat, so the quoted text above has priority
    for(int i=ArraySize(active)-1;i>=0;i--)
       if(active[i].msgId==replyTo) return i;
-   string r=ToUpperAscii(replyText);
-   if(r=="") return -1;
-   Sig s;
-   if(ParseSignal(r,s))
-   {
-      string sym="";
-      if(ResolveSymbol(s.base,sym))
-         for(int i=ArraySize(active)-1;i>=0;i--)
-            if(active[i].symbol==sym && active[i].side==s.side) return i;
-      return -1;
-   }
-   for(int i=ArraySize(active)-1;i>=0;i--)
-   {
-      string b=BrokerBaseWord(active[i].symbol);
-      if(b!="" && FindWord(r,b)>=0) return i;
-   }
+   if(r!="")
+      for(int i=ArraySize(active)-1;i>=0;i--)
+      {
+         string b=BrokerBaseWord(active[i].symbol);
+         if(b!="" && FindWord(r,b)>=0) return i;
+      }
    return -1;
 }
 bool IsCloseSignalMsg(string &u)
