@@ -3,7 +3,7 @@
 //|                          Telegram signal copier for MetaTrader 5 |
 //+------------------------------------------------------------------+
 #property copyright "telegram-copy-trade"
-#property version   "1.00"
+#property version   "1.40"
 #property strict
 #property description "Signal source: JSON files from bridge/telegram_to_mt5.py,"
 #property description "written into MQL5\\Files\\tg_signals (see below)."
