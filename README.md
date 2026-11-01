@@ -361,6 +361,7 @@ the bridge drops into `MQL5\Files\tg_signals`.
 | `InpLotGold/Forex/ETH/BTC` | Lot **per order** per category |
 | `InpMaxAgeMin` | Auto-delete untriggered **pending orders** after N minutes (default 120; `0` = never delete) |
 | `InpMaxOpen` | Max simultaneous open positions/orders (default 15) |
+| `InpMaxEntriesPerPair` | Max **concurrent signal entries per symbol+side** (default 1 = one entry at a time). The *exact* same signal (same shared SL + a shared TP leg — promo copy/re-drop) is always ignored regardless of this limit; a *different* signal on the same pair+side (own TP/SL set) is allowed only up to this many groups open at once. Groups are counted from the EA's tracking and from the account's orders/positions with the magic number, so multi-chart operation and restarts never double-count |
 | `InpZoneTolPct` | Widen the entry zone by % of its width — moves the pending trigger edge earlier by that amount (default 0) |
 | `InpDevPoints` | Deviation in points, **only** used for the market-order fallback (default 30) |
 | `InpConservativeMode` | `true` (default): when the **TP1** order closes with profit, remaining SLs move to breakeven. `false`: original SLs are kept — only the trailing cascade after TP2 applies |
@@ -372,10 +373,24 @@ the bridge drops into `MQL5\Files\tg_signals`.
 | `InpSignalsFolder` | Subfolder of `MQL5\Files` the bridge writes into (default `tg_signals`) |
 | `InpSymbolMask` | Mask that builds the **broker's exact symbol name** from the pair in the signal: `%s`=as typed, `%U`=UPPER, `%L`=lower, `%%`=literal `%` (e.g. `%s!` → `XAUUSD!`, `usd_%L` → `xauusd`; set one per terminal via its `.set`). Empty (default) = auto-detect against the connected broker; if the mask misses, it logs a warning and auto-detects anyway |
 
+## Versionado
+
+- The **authoritative version is the release**: git tag `vX.Y.Z` + GitHub Release (on `main`).
+- Mirrored **in the same commit** by `#property version "X.YZ"` in the EA source (repo copy
+  and the user's live tree alike) — so the EA's properties dialog, the `.ex5` and the GitHub
+  Release always show the same version. v1.4.0 ↔ `"1.40"`.
+- Historical note: v1.0.0→v1.3.0 were published with tags but the repo copy stayed at
+  `"1.00"` (the user's own tree carried manual bumps); from v1.4.0 onward both trees move
+  together and the drift is gone.
+
 ## Notes / limitations
 
-- Duplicate protection: a second signal for the same symbol+side is ignored while
-  one is pending or open.
+- Duplicate protection (parameter `InpMaxEntriesPerPair`, default 1): the *exact* same
+  signal (same shared SL + shared TP leg — promo copy / re-drop) is **always** ignored
+  while one of its legs is pending or open; a *different* signal on the same symbol+side
+  (its own TP/SL set) is only rejected while there are already `InpMaxEntriesPerPair`
+  groups for that pair+side open (counted from tracking + account orders/positions with
+  the magic number; default 1 keeps the one-entry-at-a-time behavior).
 - On restart, untriggered **pending orders** and open positions with your magic
   number are both re-adopted: pendings keep waiting on the account (and their
   expiry clock restarts from the reload), positions keep their current SL/TP;
