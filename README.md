@@ -373,6 +373,16 @@ the bridge drops into `MQL5\Files\tg_signals`.
 | `InpSignalsFolder` | Subfolder of `MQL5\Files` the bridge writes into (default `tg_signals`) |
 | `InpSymbolMask` | Mask that builds the **broker's exact symbol name** from the pair in the signal: `%s`=as typed, `%U`=UPPER, `%L`=lower, `%%`=literal `%` (e.g. `%s!` → `XAUUSD!`, `usd_%L` → `xauusd`; set one per terminal via its `.set`). Empty (default) = auto-detect against the connected broker; if the mask misses, it logs a warning and auto-detects anyway |
 
+## Versionado
+
+- The **authoritative version is the release**: git tag `vX.Y.Z` + GitHub Release (on `main`).
+- Mirrored **in the same commit** by `#property version "X.YZ"` in the EA source (repo copy
+  and the user's live tree alike) — so the EA's properties dialog, the `.ex5` and the GitHub
+  Release always show the same version. v1.4.0 ↔ `"1.40"`.
+- Historical note: v1.0.0→v1.3.0 were published with tags but the repo copy stayed at
+  `"1.00"` (the user's own tree carried manual bumps); from v1.4.0 onward both trees move
+  together and the drift is gone.
+
 ## Notes / limitations
 
 - Duplicate protection (parameter `InpMaxEntriesPerPair`, default 1): the *exact* same
