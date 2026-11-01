@@ -25,6 +25,7 @@ input double InpLotETH    = 0.3;  // Lot per order: ETH (ETHUSD/XETH...)
 input double InpLotBTC    = 0.03; // Lot per order: BTC (BTCUSD/XBT)
 input int    InpMaxAgeMin = 120;  // Auto-delete untriggered PENDING orders after (minutes)
 input int    InpMaxOpen   = 15;   // Max simultaneous open positions (3 per signal)
+input int    InpMaxEntriesPerPair = 1;   // Max concurrent signal entries per symbol+side (1 = only one; an exact same signal set is always ignored)
 input double InpZoneTolPct= 0.0;  // Widen zone: moves the pending trigger edge earlier by % of its width
 input int    InpDevPoints = 30;   // Deviation (points), only used for market-order fallbacks
 input int    InpTrailPts  = -1;   // Trailing after middle TP closes: -1=auto(signal risk dist), 0=off, >0=pts
@@ -713,6 +714,60 @@ bool OurOpenSourceExists(string sym,int side)
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
+//| Count distinct signal groups already open for a pair+side: our   |
+//| tracking entries plus our magic-marked orders/positions on the   |
+//| broker. A signal groups its 3 legs by their SHARED SL, so a      |
+//| group is keyed by that SL; same SL + a shared TP leg = the exact |
+//| same signal (promo copy / re-drop) -> exactDup. With max=1 this |
+//| degrades to the historical "one entry per pair+side".            |
+//+------------------------------------------------------------------+
+void CountSignalGroups(string sym,int side,double sl,double &tps[],int &groups,bool &exactDup)
+{
+   double pt=MathMax(SymbolInfoDouble(sym,SYMBOL_POINT)*2.0,1e-9);
+   groups=0; exactDup=false;
+   double seen[];
+   for(int i=0;i<ArraySize(active);i++)
+   {
+      if(active[i].symbol!=sym||active[i].side!=side) continue;
+      bool tpov=false;
+      for(int t=0;t<3;t++)for(int u=0;u<3;u++)
+         if(active[i].tp[t]>0&&tps[u]>0&&MathAbs(active[i].tp[t]-tps[u])<pt) tpov=true;
+      if(tpov&&MathAbs(active[i].sl-sl)<pt) exactDup=true;
+      bool known=false;
+      for(int k=0;k<ArraySize(seen);k++)if(MathAbs(seen[k]-active[i].sl)<pt) known=true;
+      if(!known){ ArrayResize(seen,ArraySize(seen)+1); seen[ArraySize(seen)-1]=active[i].sl; groups++; }
+   }
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong tk=PositionGetTicket(i); if(tk==0) continue;
+      if(PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
+      if(PositionGetString(POSITION_SYMBOL)!=sym) continue;
+      bool buy=(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY);
+      if((side>0&&!buy)||(side<0&&buy)) continue;
+      double osl=PositionGetDouble(POSITION_SL),otp=PositionGetDouble(POSITION_TP);
+      for(int u=0;u<3;u++)if(tps[u]>0&&otp>0&&MathAbs(tps[u]-otp)<pt&&MathAbs(osl-sl)<pt) exactDup=true;
+      bool known=false;
+      for(int k=0;k<ArraySize(seen);k++)if(MathAbs(seen[k]-osl)<pt) known=true;
+      if(!known){ ArrayResize(seen,ArraySize(seen)+1); seen[ArraySize(seen)-1]=osl; groups++; }
+   }
+   for(int i=OrdersTotal()-1;i>=0;i--)
+   {
+      ulong qk=OrderGetTicket(i); if(qk==0) continue;
+      if(OrderGetInteger(ORDER_MAGIC)!=InpMagic) continue;
+      if(OrderGetString(ORDER_SYMBOL)!=sym) continue;
+      long ot=OrderGetInteger(ORDER_TYPE);
+      bool isB=(ot==ORDER_TYPE_BUY||ot==ORDER_TYPE_BUY_LIMIT||ot==ORDER_TYPE_BUY_STOP);
+      bool isS=(ot==ORDER_TYPE_SELL||ot==ORDER_TYPE_SELL_LIMIT||ot==ORDER_TYPE_SELL_STOP);
+      if((side>0&&!isB)||(side<0&&!isS)) continue;
+      double osl=OrderGetDouble(ORDER_SL),otp=OrderGetDouble(ORDER_TP);
+      for(int u=0;u<3;u++)if(tps[u]>0&&otp>0&&MathAbs(tps[u]-otp)<pt&&MathAbs(osl-sl)<pt) exactDup=true;
+      bool known=false;
+      for(int k=0;k<ArraySize(seen);k++)if(MathAbs(seen[k]-osl)<pt) known=true;
+      if(!known){ ArrayResize(seen,ArraySize(seen)+1); seen[ArraySize(seen)-1]=osl; groups++; }
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Place the signal's orders. WITH an entry zone the EA does NOT    |
 //| wait in memory: the moment the JSON is read it sends real PENDING|
 //| orders at the zone edge - BUY STOP at the UPPER edge if BUY,     |
@@ -834,12 +889,18 @@ void HandleSignal(Sig &s)
    s.lot=lot;
 
    // duplicate: same symbol+side already pending or open, checked both in
-   // tracking and directly against the broker (survives EA restarts)
-   for(int i=0;i<ArraySize(active);i++)
-      if(active[i].symbol==s.symbol && active[i].side==s.side){
-         LogMsg("duplicate signal (pending or already open in tracking) - skipped"); return; }
-   if(OurOpenSourceExists(s.symbol,s.side)){
-      LogMsg("duplicate signal (our open pending order/position on the broker) - skipped"); return; }
+   // tracking and directly against the broker (survives EA restarts).
+   // Parameterized by InpMaxEntriesPerPair: the EXACT same signal (same shared
+   // SL + shared TP leg - promo copy / re-drop) is always ignored; a different
+   // signal on the same pair+side is allowed only while the configured limit
+   // of concurrent entries has not been reached (1 = the historical behavior).
+   int grp=0; bool exactDup=false;
+   double tpSet[3]; for(int t=0;t<3;t++) tpSet[t]=s.tp[t];
+   CountSignalGroups(s.symbol,s.side,s.sl,tpSet,grp,exactDup);
+   if(exactDup){
+      LogMsg("duplicate signal (same TP/SL set already pending or open) - always skipped"); return; }
+   if(grp>=InpMaxEntriesPerPair){
+      LogMsg("already "+IntegerToString(grp)+" concurrent entries for this pair+side (limit InpMaxEntriesPerPair="+IntegerToString(InpMaxEntriesPerPair)+") - signal skipped"); return; }
 
    if(CountOurPositions()+CountOurOpenOrders()+nTp>InpMaxOpen){
       LogMsg("too many open orders/positions (max "+IntegerToString(InpMaxOpen)+") - signal skipped"); return; }
