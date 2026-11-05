@@ -143,7 +143,12 @@ The bridge reads `config.properties` from next to the script (or next to the `.e
    - `Closing the signal` → open P/L of that signal is computed: **positive** →
      every open position is closed and untriggered pendings deleted; **negative** →
      each SL is *shortened toward* the SMA of `InpCloseMaPeriod` on the chart
-     timeframe (never loosened) and the stop decides the rest by itself.
+     timeframe (never loosened) and the stop decides the rest by itself. The stop
+     move is clamped to a broker-valid level (BUY stop below Bid, SELL stop above
+     Ask): when the lagging SMA has already been crossed by price, the stop lands
+     just beyond the market — locking the current loss instead of silently doing
+     nothing (which is what the pre-v1.5.0 build did; a rejected modify is now
+     logged with its retcode).
    **Target resolution** (in order): the bridge now writes `reply_to` (the id of
    the message the reply replies to) and `reply_to_text` (that message's text)
    into every signal file, and the EA uses that thread link first — matched
@@ -358,7 +363,7 @@ the bridge drops into `MQL5\Files\tg_signals`.
 |-------|---------|
 | `InpPollSec` | Interval between scans of the signal folder, in seconds (default 15) |
 | `InpMagic` | Magic number marking all EA orders (default 20261019) |
-| `InpLotGold/Forex/ETH/BTC` | Lot **per order** per category |
+| `InpLotGold/Forex/ETH/BTC` | Lot **per order** per category; **`0` = that asset category is never traded** — per-category kill switch, checked before sizing even when risk mode is on |
 | `InpMaxAgeMin` | Auto-delete untriggered **pending orders** after N minutes (default 120; `0` = never delete) |
 | `InpMaxOpen` | Max simultaneous open positions/orders (default 15) |
 | `InpMaxEntriesPerPair` | Max **concurrent signal entries per symbol+side** (default 1 = one entry at a time). The *exact* same signal (same shared SL + a shared TP leg — promo copy/re-drop) is always ignored regardless of this limit; a *different* signal on the same pair+side (own TP/SL set) is allowed only up to this many groups open at once. Groups are counted from the EA's tracking and from the account's orders/positions with the magic number, so multi-chart operation and restarts never double-count |
