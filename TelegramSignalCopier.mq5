@@ -13,6 +13,7 @@
 #property description "market if already at/past. TP1 close -> breakeven when"
 #property description "conservative; TP2 close -> farthest order trails (InpTrailPts)"
 #property description "Replies 'Moving SL to X' / 'Closing the signal' are handled."
+#property description "Variant 'Closing the current signal...' also recognized."
 
 #include <Trade\Trade.mqh>
 
@@ -987,7 +988,8 @@ int ResolveReplyTarget(long replyTo, string &replyText)
 bool IsCloseSignalMsg(string &u)
 {
    return StringFind(u,"CLOSING THE SIGNAL")>=0 || StringFind(u,"CLOSE THE SIGNAL")>=0
-       || StringFind(u,"SIGNAL CLOSED")>=0 || StringFind(u,"CLOSE SIGNAL")>=0;
+       || StringFind(u,"SIGNAL CLOSED")>=0 || StringFind(u,"CLOSE SIGNAL")>=0
+       || StringFind(u,"CLOSING THE CURRENT")>=0 || StringFind(u,"SWITCHING TO THE NEW")>=0;
 }
 bool IsSlMoveMsg(string &u)
 {
@@ -1146,7 +1148,11 @@ void ProcessMessage(string text, long msgId, long replyTo, string &replyText)
    {
       int idx=ResolveReplyTarget(replyTo,replyText);
       if(idx>=0) LogMsg("management reply matched its Telegram thread target (message "+IntegerToString(replyTo)+")");
-      else idx=FindManagementTarget(u);
+      else
+      {
+         if(replyTo!=0) LogMsg("no tracked signal for reply target message "+IntegerToString(replyTo)+" (its orders may never have opened) - trying text fallback");
+         idx=FindManagementTarget(u);
+      }
       if(idx<0) return;
       if(IsSlMoveMsg(u))
       {
