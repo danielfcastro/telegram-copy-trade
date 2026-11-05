@@ -3,7 +3,7 @@
 //|                          Telegram signal copier for MetaTrader 5 |
 //+------------------------------------------------------------------+
 #property copyright "telegram-copy-trade"
-#property version   "1.40"
+#property version   "1.50"
 #property strict
 #property description "Signal source: JSON files from bridge/telegram_to_mt5.py,"
 #property description "written into MQL5\\Files\\tg_signals (see below)."
@@ -876,6 +876,13 @@ void HandleSignal(Sig &s)
    }
    s.symbol=sym;
    int nTp=0; for(int t=0;t<3;t++) if(s.tp[t]>0) nTp++;
+   // a category fixed-lot input at 0 = trading disabled for that asset category
+   // (per-category kill switch; checked even if risk sizing is on, since the
+   // LotSize inputs are the category reference - risk only replaces the size)
+   if(GetLot(s.base)<=0.0)
+   {
+      LogMsg("trading disabled for "+s.base+" (its LotSize input is 0) - signal skipped"); return;
+   }
    double lot=0.0;
    if(InpRiskPct>0)
       lot=RiskLot(sym,s.side,s.sl,s.eLow,s.eHigh,nTp);
@@ -1095,6 +1102,8 @@ void ApplyCloseSignal(int idx)
    }
    if(InpCloseMaPeriod<=0)
    { LogMsg("negative P/L and InpCloseMaPeriod=0 -> keeping current stops"); return; }
+   double ptS=SymbolInfoDouble(sym,SYMBOL_POINT);
+   double stp=MathMax(SymbolInfoInteger(sym,SYMBOL_TRADE_STOPS_LEVEL)*ptS,ptS);   // broker stop-distance floor
    double ma=0.0;
    for(int k=0;k<InpCloseMaPeriod;k++) ma+=iClose(sym,PERIOD_CURRENT,k);
    if(InpCloseMaPeriod>0) ma/=(double)InpCloseMaPeriod;
@@ -1109,9 +1118,21 @@ void ApplyCloseSignal(int idx)
          if(PositionGetTicket(q)==tk){ oldsl=PositionGetDouble(POSITION_SL); ok=true; break; }
       if(!ok) continue;
       double nt=(active[idx].side>0)?(ma>oldsl?ma:oldsl):(ma<oldsl?ma:oldsl);  // only tighten
+      // the broker requires a BUY stop below Bid and a SELL stop above Ask; the
+      // SMA lags price, so when the market already crossed the SMA the raw SMA
+      // stop would be rejected - the old code did this SILENTLY and nothing
+      // happened. Clamp to the valid cap: the stop lands just beyond the market
+      // (equivalent to locking the current loss now), never loosening.
+      if(active[idx].side>0)
+      { double cap=iBidPrice(sym,0)-stp-ptS; if(nt>cap) nt=cap; }
+      else
+      { double cap=iAskPrice(sym,0)+stp+ptS; if(nt<cap) nt=cap; }
       if(nt==oldsl) continue;
+      if(active[idx].side>0&&nt<=oldsl) continue;   // clamp made it not tighten
+      if(active[idx].side<0&&nt>=oldsl) continue;
       if(trade.PositionModify(tk,nt,active[idx].tp[j]))
       { active[idx].sl=nt; LogMsg("SL shorted to "+DoubleToString(nt,dg)+" on ticket "+IntegerToString((long)tk)+" ("+sym+" TP"+IntegerToString(j+1)+")"); }
+      else LogMsg("SL short REJECTED on ticket "+IntegerToString((long)tk)+" (retcode "+IntegerToString((long)trade.ResultRetcode())+")");
    }
 }
 
