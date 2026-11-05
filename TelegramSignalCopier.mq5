@@ -13,7 +13,7 @@
 #property description "market if already at/past. TP1 close -> breakeven when"
 #property description "conservative; TP2 close -> farthest order trails (InpTrailPts)"
 #property description "Replies 'Moving SL to X' / 'Closing the signal' are handled."
-#property description "Variant 'Closing the current signal...' also recognized."
+#property description "Variants of the close phrase handled."
 
 #include <Trade\Trade.mqh>
 
