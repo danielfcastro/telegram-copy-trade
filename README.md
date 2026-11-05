@@ -140,7 +140,8 @@ The bridge reads `config.properties` from next to the script (or next to the `.e
    active signal:
    - `Moving SL to <value>` → the shared SL moves to that value — applied to open
      positions (`PositionModify`) and to untriggered pendings (`OrderModify`).
-   - `Closing the signal` → open P/L of that signal is computed: **positive** →
+   - `Closing the signal` (also recognized: "Closing the current signal and switching
+     to the new one") → open P/L of that signal is computed: **positive** →
      every open position is closed and untriggered pendings deleted; **negative** →
      each SL is *shortened toward* the SMA of `InpCloseMaPeriod` on the chart
      timeframe (never loosened) and the stop decides the rest by itself. The stop
