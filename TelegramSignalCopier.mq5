@@ -3,7 +3,7 @@
 //|                          Telegram signal copier for MetaTrader 5 |
 //+------------------------------------------------------------------+
 #property copyright "telegram-copy-trade"
-#property version   "1.50"
+#property version   "1.60"
 #property strict
 #property description "Signal source: JSON files from bridge/telegram_to_mt5.py,"
 #property description "written into MQL5\\Files\\tg_signals (see below)."
@@ -1515,15 +1515,106 @@ int OnInit()
    Print("[TG-COPIER] Channel replies handled: 'Moving SL to X' moves stops; 'Closing the signal' closes all if P/L>0, else shortens SLs to SMA("+IntegerToString(InpCloseMaPeriod)+") on the chart timeframe.");
    FolderCreate(InpSignalsFolder);   // best-effort: the bridge creates the folder too; if it does not
                                     // exist yet, a scan simply finds nothing
-   // adopt positions already open with our magic (they keep their current SL/TP)
-   for(int i=PositionsTotal()-1;i>=0;i--)
-   {
-      ulong tk=PositionGetTicket(i);
-      if(tk!=0 && PositionGetInteger(POSITION_MAGIC)==InpMagic)
-         LogMsg("adopting existing open position ticket "+IntegerToString((long)tk));
-   }
+   // rebuild signal tracking after a reload/restart so break-even, trailing,
+   // expiry and management replies keep working for signals opened before the
+   // EA (re)initialized - previously this loop only LOGGED the tickets, the
+   // tracking arrays were left empty and the whole ladder management went dead
+   // after every reload (TrailingAfterPTS=0 lines never armed, for example).
+   AdoptTrackedSignals();
    return(INIT_SUCCEEDED);
 }
+
+//+------------------------------------------------------------------+
+//| AdoptTrackedSignals: regroup the account's magic positions AND    |
+//| untriggered magic pending orders into active[] signal entries     |
+//| (grouped by symbol+side+shared SL, the same signature a signal    |
+//| was opened with). Telegram msgId is gone (files already consumed) |
+//| -> msgId=0: thread replies then match these by pair+side text.    |
+//| The pending placement time (ORDER_TIME_SETUP) is kept so the      |
+//| MaxAgeMinutes expiry clock survives restarts.                     |
+//| Caveat: legs whose SL was modified individually (trailing moved   |
+//| them apart) group as separate entries - they still stay managed.  |
+//+------------------------------------------------------------------+
+int FindAdoptGroup(string sym,int side,double sl)
+   {
+    for(int j=0;j<ArraySize(active);j++)
+      if(active[j].symbol==sym && active[j].side==side && active[j].sl==sl) return j;
+    return -1;
+   }
+string BaseNameOf(string sym)
+   {
+    string b="";
+    for(int i=0;i<StringLen(sym);i++)
+      {
+       ushort c=StringGetCharacter(sym,i);
+       if((c>=65&&c<=90)||(c>=97&&c<=122)) b+=ShortToString((ushort)c); else break;
+      }
+    return b;   // "XAUUSD!" -> "XAUUSD" (GetLot maps by substring)
+   }
+void AdoptTrackedSignals()
+   {
+    //--- open positions (legs triggered before the reload)
+    for(int i=PositionsTotal()-1;i>=0;i--)
+      {
+       ulong tk=PositionGetTicket(i);
+       if(tk==0 || PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
+       string sym=PositionGetString(POSITION_SYMBOL);
+       int side=((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY)?1:-1;
+       double sl=PositionGetDouble(POSITION_SL), tp=PositionGetDouble(POSITION_TP);
+       int idx=FindAdoptGroup(sym,side,sl);
+       if(idx<0)
+         {
+          Sig z;
+          z.msgId=0; z.created=TimeCurrent();
+          z.base=BaseNameOf(sym); z.symbol=sym; z.side=side;
+          z.eLow=0.0; z.eHigh=0.0;
+          z.sl=sl; z.lot=PositionGetDouble(POSITION_VOLUME);
+          for(int j=0;j<3;j++){ z.tp[j]=0.0; z.ticket[j]=0; z.oticket[j]=0; z.trail[j]=false; z.trailv[j]=0.0; z.alive[j]=false; z.done[j]=false; }
+          z.trailDist=0.0;
+          idx=ArraySize(active); ArrayResize(active,idx+1); active[idx]=z;
+         }
+       int slot=-1;
+       for(int j=0;j<3;j++) if(active[idx].ticket[j]==0 && active[idx].oticket[j]==0){ slot=j; break; }
+       if(slot<0){ LogMsg("adopt: "+sym+" leg slots full - ticket "+IntegerToString((long)tk)+" left untracked"); continue; }
+       active[idx].ticket[slot]=tk; active[idx].tp[slot]=tp; active[idx].alive[slot]=true;
+       LogMsg("adopting existing open position ticket "+IntegerToString((long)tk)+" ("+sym+" SL "+DoubleToString(sl,(int)SymbolInfoInteger(sym,SYMBOL_DIGITS))+")");
+      }
+    //--- untriggered pendings (expiry clock keeps running via ORDER_TIME_SETUP)
+    for(int i=OrdersTotal()-1;i>=0;i--)
+      {
+       ulong ot=OrderGetTicket(i);
+       if(ot==0 || OrderGetInteger(ORDER_MAGIC)!=InpMagic) continue;
+       ENUM_ORDER_TYPE otype=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+       int side=0;
+       if(otype==ORDER_TYPE_BUY_STOP||otype==ORDER_TYPE_BUY_LIMIT) side=1;
+       else if(otype==ORDER_TYPE_SELL_STOP||otype==ORDER_TYPE_SELL_LIMIT) side=-1;
+       else continue;
+       string sym=OrderGetString(ORDER_SYMBOL);
+       double sl=OrderGetDouble(ORDER_SL), tp=OrderGetDouble(ORDER_TP);
+       int idx=FindAdoptGroup(sym,side,sl);
+       if(idx<0)
+         {
+          Sig z;
+          z.msgId=0; z.created=(datetime)OrderGetInteger(ORDER_TIME_SETUP);
+          z.base=BaseNameOf(sym); z.symbol=sym; z.side=side;
+          z.eLow=0.0; z.eHigh=0.0;
+          z.sl=sl; z.lot=OrderGetDouble(ORDER_VOLUME_CURRENT);
+          for(int j=0;j<3;j++){ z.tp[j]=0.0; z.ticket[j]=0; z.oticket[j]=0; z.trail[j]=false; z.trailv[j]=0.0; z.alive[j]=false; z.done[j]=false; }
+          z.trailDist=0.0;
+          idx=ArraySize(active); ArrayResize(active,idx+1); active[idx]=z;
+         }
+       else
+         {
+          datetime setup=(datetime)OrderGetInteger(ORDER_TIME_SETUP);
+          if(setup>0 && setup<active[idx].created) active[idx].created=setup;   // oldest leg sets the age
+         }
+       int slot=-1;
+       for(int j=0;j<3;j++) if(active[idx].ticket[j]==0 && active[idx].oticket[j]==0){ slot=j; break; }
+       if(slot<0){ LogMsg("adopt: "+sym+" leg slots full - pending "+IntegerToString((long)ot)+" left untracked"); continue; }
+       active[idx].oticket[slot]=ot; active[idx].tp[slot]=tp;
+       LogMsg("adopting untriggered pending order ticket "+IntegerToString((long)ot)+" ("+sym+")");
+      }
+   }
 
 //+------------------------------------------------------------------+
 //| Expert tick                                                      |
