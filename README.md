@@ -397,11 +397,16 @@ the bridge drops into `MQL5\Files\tg_signals`.
   (its own TP/SL set) is only rejected while there are already `InpMaxEntriesPerPair`
   groups for that pair+side open (counted from tracking + account orders/positions with
   the magic number; default 1 keeps the one-entry-at-a-time behavior).
-- On restart, untriggered **pending orders** and open positions with your magic
-  number are both re-adopted: pendings keep waiting on the account (and their
-  expiry clock restarts from the reload), positions keep their current SL/TP;
-  the TP→breakeven rules then apply to the next closes. A **trailing** stop that
-  was already armed stays at the last value applied (the EA stops following the
-  price for it until the signal is tracked again).
+- On restart/reload/recompile, untriggered **pending orders** and open positions with
+  your magic number are **fully re-adopted into the signal ladder**: `AdoptTrackedSignals()`
+  regroups them into the EA's tracking (symbol+side+shared SL signature) so break-even
+  after TP closes, the `InpTrailPts`/`TrailingAfterPTS` trailing, 120-min expiry and
+  management replies keep working for trades opened before the reload. Pendings keep their
+  original placement time (`ORDER_TIME_SETUP`) so the expiry clock survives restarts;
+  positions keep their current SL/TP. Telegram `msgId` is lost for pre-reload trades
+  (files already consumed) — thread replies then match them by pair+side text fallback.
+  The TP→breakeven rules then apply to the next closes; a trailing stop already armed
+  before the reload stays at the last value applied (trailing re-arms only when that
+  signal's middle TP leg closes again inside the new tracking).
 - All EA orders carry comment `TG SIG` and your magic number, so you can manage
   them manually without affecting other positions.
