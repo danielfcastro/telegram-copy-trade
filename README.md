@@ -140,7 +140,8 @@ The bridge reads `config.properties` from next to the script (or next to the `.e
    active signal:
    - `Moving SL to <value>` → the shared SL moves to that value — applied to open
      positions (`PositionModify`) and to untriggered pendings (`OrderModify`).
-   - `Closing the signal` → open P/L of that signal is computed: **positive** →
+   - `Closing the signal` (also recognized: "Closing the current signal and switching
+     to the new one") → open P/L of that signal is computed: **positive** →
      every open position is closed and untriggered pendings deleted; **negative** →
      each SL is *shortened toward* the SMA of `InpCloseMaPeriod` on the chart
      timeframe (never loosened) and the stop decides the rest by itself. The stop
@@ -396,11 +397,16 @@ the bridge drops into `MQL5\Files\tg_signals`.
   (its own TP/SL set) is only rejected while there are already `InpMaxEntriesPerPair`
   groups for that pair+side open (counted from tracking + account orders/positions with
   the magic number; default 1 keeps the one-entry-at-a-time behavior).
-- On restart, untriggered **pending orders** and open positions with your magic
-  number are both re-adopted: pendings keep waiting on the account (and their
-  expiry clock restarts from the reload), positions keep their current SL/TP;
-  the TP→breakeven rules then apply to the next closes. A **trailing** stop that
-  was already armed stays at the last value applied (the EA stops following the
-  price for it until the signal is tracked again).
+- On restart/reload/recompile, untriggered **pending orders** and open positions with
+  your magic number are **fully re-adopted into the signal ladder**: `AdoptTrackedSignals()`
+  regroups them into the EA's tracking (symbol+side+shared SL signature) so break-even
+  after TP closes, the `InpTrailPts`/`TrailingAfterPTS` trailing, 120-min expiry and
+  management replies keep working for trades opened before the reload. Pendings keep their
+  original placement time (`ORDER_TIME_SETUP`) so the expiry clock survives restarts;
+  positions keep their current SL/TP. Telegram `msgId` is lost for pre-reload trades
+  (files already consumed) — thread replies then match them by pair+side text fallback.
+  The TP→breakeven rules then apply to the next closes; a trailing stop already armed
+  before the reload stays at the last value applied (trailing re-arms only when that
+  signal's middle TP leg closes again inside the new tracking).
 - All EA orders carry comment `TG SIG` and your magic number, so you can manage
   them manually without affecting other positions.
