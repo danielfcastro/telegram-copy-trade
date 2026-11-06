@@ -1,0 +1,16 @@
+[Unit]
+Description=Telegram->MT5 bridge (Telethon watcher)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/mnt/data/projetos/telegram-copy-trade
+ExecStart=/mnt/data/projetos/telegram-copy-trade/venv/bin/python3 -u /mnt/data/projetos/telegram-copy-trade/bridge/telegram_to_mt5.py
+Restart=always
+RestartSec=10
+# keep logging to the same bridge.log the heartbeat/status shows from
+StandardOutput=append:/mnt/data/projetos/telegram-copy-trade/bridge/bridge.log
+StandardError=append:/mnt/data/projetos/telegram-copy-trade/bridge/bridge.log
+
+[Install]
+WantedBy=default.target

@@ -118,7 +118,14 @@ The bridge reads `config.properties` from next to the script (or next to the `.e
   `[WARN] message from unwatched chat <id> ...` lines in the bridge log — they
   reveal the **real chat ids** of your channels; paste those ids into `groups=`
   (the web link id also works, the bridge derives the real forms by itself). Also confirm it's alive:
-  `pgrep -af telegram_to_mt5` (start/stop via `bridge/start_bridge.sh`). A
+  `pgrep -af telegram_to_mt5`. **Autostart/crash-resilience (WSL2, no cron):** the bridge runs
+  as a **systemd user service** (`bridge/systemd/telegram-mt5-bridge.service`, unit kept in
+  the repo) — installed at `~/.config/systemd/user/`, enabled with `loginctl enable-linger`
+  so it starts when the WSL instance starts, and `Restart=always` relaunches it within 10 s
+  if it ever dies. Manage it with `systemctl --user {status|restart|stop} telegram-mt5-bridge.service`
+  (do NOT use `bridge/start_bridge.sh start` while the service is enabled — that would run a
+  second watcher). `bridge/start_bridge.sh` remains available for machines without systemd.
+  A
   `database is locked` fatal error means you launched a **second** watcher while
   one was already running (both share the same Telethon session SQLite file) —
   stop one of them first (`bridge/start_bridge.sh stop` or `pkill -f telegram_to_mt5`)
